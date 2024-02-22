@@ -2,24 +2,57 @@ import { useState } from 'react';
 import useWebSocket from 'react-use-websocket';
 import './App.css';
 
-const WS_URL = 'wss://api.livereachmedia.com/api/v1/marketing/displays/internal//ws?v=1&passive=true&zone_id=4111';
+const CONCORDE_WS_URL = 'wss://api.livereachmedia.com/api/v1/marketing/displays/internal//ws?v=1&passive=true&zone_id=4111';
+const FIRST_WS_URL = 'wss://api.livereachmedia.com/api/v1/marketing/displays/internal//ws?v=1&passive=true&zone_id=4112';
+const SOUTH_WS_URL = 'wss://api.livereachmedia.com/api/v1/marketing/displays/internal//ws?v=1&passive=true&zone_id=4113';
+const NORTH_WS_URL = 'wss://api.livereachmedia.com/api/v1/marketing/displays/internal//ws?v=1&passive=true&zone_id=4114';
+const B_WS_URL = 'wss://api.livereachmedia.com/api/v1/marketing/displays/internal//ws?v=1&passive=true&zone_id=4115'
 
 function App() {
-  const [occupancy, setOccupancy] = useState(null);
+  const [concordeOccupancy, setConcordeOccupancy] = useState(null);
+  const [firstOccupancy, setFirstOccupancy] = useState(null);
+  const [southOccupancy, setSouthOccupancy] = useState(null);
+  const [northOccupancy, setNorthOccupancy] = useState(null);
+  const [bOccupancy, setBOccupancy] = useState(null);
 
-  useWebSocket(WS_URL, {
-    onOpen: () => {
-      console.log('WebSocket connection established.');
-    },
+  useWebSocket(CONCORDE_WS_URL, {
     onMessage: (payload) => {
       const data = JSON.parse(payload.data);
-      setOccupancy(data.args.camera.occupancy);
+      setConcordeOccupancy(data.args.camera.occupancy);
+    }
+  });
+  useWebSocket(FIRST_WS_URL, {
+    onMessage: (payload) => {
+      const data = JSON.parse(payload.data);
+      setFirstOccupancy(data.args.camera.occupancy);
+    }
+  });
+  useWebSocket(SOUTH_WS_URL, {
+    onMessage: (payload) => {
+      const data = JSON.parse(payload.data);
+      setSouthOccupancy(data.args.camera.occupancy);
+    }
+  });
+  useWebSocket(NORTH_WS_URL, {
+    onMessage: (payload) => {
+      const data = JSON.parse(payload.data);
+      setNorthOccupancy(data.args.camera.occupancy);
+    }
+  });
+  useWebSocket(B_WS_URL, {
+    onMessage: (payload) => {
+      const data = JSON.parse(payload.data);
+      setBOccupancy(data.args.camera.occupancy);
     }
   });
 
   return (
     <div>
-      {occupancy && <p>Concorde Room occupancy is currently {occupancy} out of 188.</p>}
+      {concordeOccupancy && <p>Concorde Room occupancy is currently {concordeOccupancy} out of 188.</p>}
+      {firstOccupancy && <p>First Lounge occupancy is currently {firstOccupancy} out of 418.</p>}
+      {southOccupancy && <p>South Lounge occupancy is currently {southOccupancy} out of 627.</p>}
+      {northOccupancy && <p>North Lounge occupancy is currently {northOccupancy} out of 305.</p>}
+      {bOccupancy && <p>B Gates Lounge occupancy is currently {bOccupancy} out of 216.</p>}
     </div>
   );
 }
