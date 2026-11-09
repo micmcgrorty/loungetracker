@@ -66,7 +66,11 @@ jobs:
             failed=1
           fi
           exit $failed
+      # Test the commit the preview serves. The default for pull_request is the PR merged into the
+      # current main, which differs from the preview once main moves on.
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
       - uses: actions/setup-node@v7
         with:
           node-version: 24
