@@ -34,17 +34,17 @@ Netlify builds and hosts the site (`netlify.toml`): `npm run build` publishes `d
 - `app/`: the shell. `main.tsx` mounts the app, and `global.css` holds the design tokens and base element styles.
 - `lounges/`: everything about lounges and their occupancy.
   - `lounges.ts`: `LOUNGES`, the one table of lounges (name and feed zone) in display order. Adding or changing a lounge means changing this table only. Capacities are not hard-coded: the feed reports each zone's capacity with its occupancy.
-  - `occupancy-feed.ts`: the feed protocol, with no React. `feedUrl(zoneId)` builds a zone's websocket URL and `parseReport(data)` reads a message into an `OccupancyReport` (occupancy and capacity), returning `null` for anything that isn't a complete report.
-  - `use-occupancy.ts`: `useOccupancy(zoneId)`, a zone's latest report, or `null` until it sends one. It's the only code that opens a websocket.
-  - `lounge-occupancy.tsx`: one lounge's line. Each lounge renders its own component, so each owns its own feed.
+  - `occupancy-feed.ts`: the occupancy feed module, with no React. `watchOccupancy(zoneId, onChange)` owns everything about a zone's feed: its URL, reading messages, keeping the last good report, and the connection's lifecycle (reconnecting with backoff, treating a minute's silence as a drop). It reports a `FeedState`: the latest `report` (occupancy and capacity, or `null` before the first) and whether it's `live`. The socket sits behind a seam, `ConnectFeed`: `connectWebSocket` (the browser's `WebSocket`) in the app, and a fake in `occupancy-feed.test.ts`, which tests the module with fake timers.
+  - `use-occupancy.ts`: `useOccupancy(zoneId)`, the React hook around `watchOccupancy`. It holds no rules of its own.
+  - `lounge-occupancy.tsx`: one lounge's line: nothing before the first report, the figure while it's live, and the last figure marked "reconnecting…" while it isn't. Each lounge renders its own component, so each owns its own feed.
   - `lounges-page.tsx`: the page, one `LoungeOccupancy` per entry in `LOUNGES`.
 - Root `public/` contains static files served unchanged from the app root, such as `favicon.svg`.
 
 ## Conventions
 
-- The feed is a third-party API, so treat everything it sends as untrusted: `parseReport` never throws, and a message that isn't a complete report (including one without a capacity) leaves the last good report showing.
+- The feed is a third-party API, so treat everything it sends as untrusted: reading a message never throws, and a message that isn't a complete report (including one without a capacity) leaves the last good report showing.
+- Feed behaviour (what counts as a report, reconnect timing, silence) belongs in `occupancy-feed.ts` and is tested through `watchOccupancy`'s interface, not in the hook or the page.
 - 0 is an occupancy, not a missing one. Test for `null`, never for truthiness.
-- `react-use-websocket` is CommonJS only, and its default export doesn't survive ES module interop, so `use-occupancy.ts` imports the hook by name from `react-use-websocket/dist/lib/use-websocket`. It's due to be replaced by a small native hook; don't import it anywhere else.
 - Style with CSS modules and the tokens in `global.css`. Use the `style` prop only for per-item values.
-- E2E tests are the behaviour contract, so they must not depend on the framework or on live data. They never contact the live feeds: each test answers every feed with `page.routeWebSocket` and sends its own messages. Locate by role and text, never by class or DOM shape.
+- E2E tests are the behaviour contract, so they must not depend on the framework or on live data. They never contact the live feeds: each test answers every feed with `page.routeWebSocket` and sends its own messages. Locate by role and text, never by class or DOM shape. To test a drop, close a feed's `WebSocketRoute` and wait for the page to open a new one.
 - Write each e2e test with plain Playwright calls; don't add shared helper modules. Helpers local to a spec file are fine. Test user flows, not CSS.

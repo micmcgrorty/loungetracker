@@ -16,7 +16,8 @@ Live at [loungetracker.netlify.app](https://loungetracker.netlify.app).
 
 - **Each lounge is defined once.** `LOUNGES` lists each lounge's name and feed zone (capacity comes from the feed); the page renders one component per entry, and each component opens its own feed.
 - **The feed is untrusted.** Messages are parsed by one function that never throws. Anything that isn't an occupancy report is ignored, so a bad message never blanks a lounge or breaks the page.
-- **Tests don't need the live feeds.** The e2e suite plays the websocket server for every lounge, so it can test empty lounges, updates and bad messages on demand.
+- **Feeds recover on their own.** A feed that closes, fails or goes quiet for a minute reconnects, waiting a second and doubling up to 30 seconds between attempts. Meanwhile its lounge keeps the last figure, marked as reconnecting rather than shown as live.
+- **Tests don't need the live feeds.** The e2e suite plays the websocket server for every lounge, so it can test empty lounges, updates, bad messages and dropped feeds on demand. The feed module's timing rules are unit tested with a fake socket and fake timers.
 
 ## Development
 
