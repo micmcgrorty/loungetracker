@@ -46,5 +46,6 @@ Netlify builds and hosts the site (`netlify.toml`): `npm run build` publishes `d
 - Feed behaviour (what counts as a report, reconnect timing, silence) belongs in `occupancy-feed.ts` and is tested through `watchOccupancy`'s interface, not in the hook or the page.
 - 0 is an occupancy, not a missing one. Test for `null`, never for truthiness.
 - Style with CSS modules and the tokens in `global.css`. Use the `style` prop only for per-item values.
+- The page fits a laptop or phone screen without scrolling (down to about 1280×600 and 390×640). Keep its height in `dvh`, not `vh`, which on phones includes the hidden address bar, and check new content doesn't push it past those sizes.
 - E2E tests are the behaviour contract, so they must not depend on the framework or on live data. They never contact the live feeds: each test answers every feed with `page.routeWebSocket` and sends its own messages. Locate by role and text, never by class or DOM shape: a lounge's row is the list item headed by its name. To test a drop, close a feed's `WebSocketRoute` and wait for the page to open a new one.
 - Write each e2e test with plain Playwright calls; don't add shared helper modules. Helpers local to a spec file are fine. Test user flows, not CSS.
