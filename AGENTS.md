@@ -33,16 +33,16 @@ The site is hosted on Surge: `npm run build`, then publish `dist/`. It will move
 
 - `app/`: the shell. `main.tsx` mounts the app, and `global.css` holds the design tokens and base element styles.
 - `lounges/`: everything about lounges and their occupancy.
-  - `lounges.ts`: `LOUNGES`, the one table of lounges (name, feed zone, capacity) in display order. Adding or changing a lounge means changing this table only.
-  - `occupancy-feed.ts`: the feed protocol, with no React. `feedUrl(zoneId)` builds a zone's websocket URL and `parseOccupancy(data)` reads a message, returning `null` for anything that isn't an occupancy report.
-  - `use-occupancy.ts`: `useOccupancy(zoneId)`, a zone's latest occupancy, or `null` until it reports. It's the only code that opens a websocket.
+  - `lounges.ts`: `LOUNGES`, the one table of lounges (name and feed zone) in display order. Adding or changing a lounge means changing this table only. Capacities are not hard-coded: the feed reports each zone's capacity with its occupancy.
+  - `occupancy-feed.ts`: the feed protocol, with no React. `feedUrl(zoneId)` builds a zone's websocket URL and `parseReport(data)` reads a message into an `OccupancyReport` (occupancy and capacity), returning `null` for anything that isn't a complete report.
+  - `use-occupancy.ts`: `useOccupancy(zoneId)`, a zone's latest report, or `null` until it sends one. It's the only code that opens a websocket.
   - `lounge-occupancy.tsx`: one lounge's line. Each lounge renders its own component, so each owns its own feed.
   - `lounges-page.tsx`: the page, one `LoungeOccupancy` per entry in `LOUNGES`.
 - Root `public/` contains static files served unchanged from the app root, such as `favicon.svg`.
 
 ## Conventions
 
-- The feed is a third-party API, so treat everything it sends as untrusted: `parseOccupancy` never throws, and a message that isn't an occupancy report leaves the last good value showing.
+- The feed is a third-party API, so treat everything it sends as untrusted: `parseReport` never throws, and a message that isn't a complete report (including one without a capacity) leaves the last good report showing.
 - 0 is an occupancy, not a missing one. Test for `null`, never for truthiness.
 - `react-use-websocket` is CommonJS only, and its default export doesn't survive ES module interop, so `use-occupancy.ts` imports the hook by name from `react-use-websocket/dist/lib/use-websocket`. It's due to be replaced by a small native hook; don't import it anywhere else.
 - Style with CSS modules and the tokens in `global.css`. Use the `style` prop only for per-item values.

@@ -3,19 +3,19 @@ import { useState } from "react";
 // import the hook by name from its own file. Replace the package rather than add to this.
 import { useWebSocket } from "react-use-websocket/dist/lib/use-websocket";
 
-import { feedUrl, parseOccupancy } from "./occupancy-feed.ts";
+import { feedUrl, parseReport, type OccupancyReport } from "./occupancy-feed.ts";
 
 /**
- * A zone's latest reported occupancy, or null until its feed reports one.
- * Messages that aren't occupancy reports are ignored, keeping the last good value.
+ * A zone's latest occupancy report, or null until its feed sends one.
+ * Messages that aren't occupancy reports are ignored, keeping the last good report.
  */
-export function useOccupancy(zoneId: number): number | null {
-	let [occupancy, setOccupancy] = useState<number | null>(null);
+export function useOccupancy(zoneId: number): OccupancyReport | null {
+	let [report, setReport] = useState<OccupancyReport | null>(null);
 	useWebSocket(feedUrl(zoneId), {
 		onMessage: (event) => {
-			let reported = parseOccupancy(event.data);
-			if (reported !== null) setOccupancy(reported);
+			let reported = parseReport(event.data);
+			if (reported !== null) setReport(reported);
 		},
 	});
-	return occupancy;
+	return report;
 }
