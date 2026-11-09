@@ -54,7 +54,12 @@ jobs:
           check /favicon.svg 200
           check /fonts/inter-latin.woff2 200
           check /no/such/page 404
-          asset=$(curl -s "$E2E_BASE_URL/" | grep -o '/assets/[^"]*\.js' | head -1)
+          # Retried like the checks above: a new deploy's first answers can lack the built page.
+          for attempt in 1 2 3 4; do
+            asset=$(curl -s "$E2E_BASE_URL/" | grep -o '/assets/[^"]*\.js' | head -1 || true)
+            [ -n "$asset" ] && break
+            sleep 5
+          done
           if [ -z "$asset" ]; then
             echo "::error::Found no script in /assets on the home page"
             exit 1
