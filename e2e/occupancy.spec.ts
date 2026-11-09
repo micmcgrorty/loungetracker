@@ -75,7 +75,6 @@ test("updates a lounge when its feed reports again", async ({ page }) => {
 });
 
 test("shows an empty lounge", async ({ page }) => {
-	test.fail(true, "A lounge with 0 occupancy is hidden; fixed in the architecture change.");
 	let feed = await mockFeeds(page);
 	await page.goto("/");
 	let lounge = LOUNGES[0];
@@ -102,7 +101,6 @@ test("keeps showing lounges when a feed sends something unreadable", async ({ pa
 });
 
 test("ignores unreadable messages without throwing", async ({ page }) => {
-	test.fail(true, "Unreadable messages throw in the page; fixed in the architecture change.");
 	let errors: Error[] = [];
 	page.on("pageerror", (error) => errors.push(error));
 	let feed = await mockFeeds(page);
