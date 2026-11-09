@@ -1,10 +1,16 @@
+/* The page fits a laptop or phone screen without scrolling: it fills the visible viewport (dvh,
+   which leaves out a phone browser's address bar, unlike vh), centres its content, and its outer
+   spacing shrinks with the viewport's height. */
 .page {
 	max-width: 640px;
+	min-height: 100vh;
+	min-height: 100dvh;
 	margin: 0 auto;
-	padding: 72px 20px 56px;
+	padding: clamp(16px, 4vh, 48px) 20px;
 	display: flex;
 	flex-direction: column;
-	gap: 28px;
+	justify-content: center;
+	gap: clamp(16px, 2.5vh, 28px);
 }
 
 .header {
@@ -24,7 +30,7 @@
 
 .title {
 	margin: 0;
-	font-size: 36px;
+	font-size: 32px;
 	line-height: 1.15;
 	font-weight: 700;
 	letter-spacing: -0.02em;
@@ -32,7 +38,7 @@
 
 .list {
 	margin: 0;
-	padding: 4px 24px;
+	padding: 2px 24px;
 	list-style: none;
 	background: var(--surface);
 	border-radius: 16px;

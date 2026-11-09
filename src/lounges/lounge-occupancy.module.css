@@ -1,8 +1,8 @@
 .row {
-	padding: 20px 0;
+	padding: 14px 0;
 	display: flex;
 	flex-direction: column;
-	gap: 12px;
+	gap: 10px;
 }
 
 .row + .row {
