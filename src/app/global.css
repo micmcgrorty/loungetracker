@@ -1,0 +1,20 @@
+/* Design tokens. Every component styles itself with these. */
+:root {
+	--bg-top: rgb(232, 232, 232);
+	--bg-bottom: rgb(255, 255, 255);
+	--text: #000000;
+}
+
+*,
+*::before,
+*::after {
+	box-sizing: border-box;
+}
+
+body {
+	margin: 0;
+	min-height: 100vh;
+	background: linear-gradient(180deg, var(--bg-top) 0%, var(--bg-bottom) 100%);
+	color: var(--text);
+	font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+}
