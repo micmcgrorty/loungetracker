@@ -52,6 +52,7 @@ jobs:
           }
           check / 200
           check /favicon.svg 200
+          check /fonts/inter-latin.woff2 200
           check /no/such/page 404
           asset=$(curl -s "$E2E_BASE_URL/" | grep -o '/assets/[^"]*\.js' | head -1)
           if [ -z "$asset" ]; then
