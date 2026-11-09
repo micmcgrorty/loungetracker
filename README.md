@@ -2,13 +2,15 @@
 
 Live occupancy of five airport lounges (Concorde Room, First, South, North and B Gates), against each lounge's capacity. Both figures come from each lounge's own live websocket feed, and update as it reports.
 
+Live at [loungetracker.netlify.app](https://loungetracker.netlify.app).
+
 ## Stack
 
 - React 19, in TypeScript
 - CSS modules, with design tokens as CSS custom properties
 - [Vite+](https://viteplus.dev): Vite for dev and build, Vitest for unit tests, Oxlint and Oxfmt for linting and formatting
 - Playwright for end-to-end tests on desktop and mobile Chromium, with every feed mocked
-- GitHub Actions for CI, and Surge for hosting
+- GitHub Actions for CI, and Netlify for hosting and deploy previews
 
 ## How it works
 
