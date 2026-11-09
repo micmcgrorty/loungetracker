@@ -24,12 +24,24 @@ function occupancyMessage(lounge: Lounge, occupancy: number, capacity = lounge.c
 	});
 }
 
-function occupancyText(lounge: Lounge, occupancy: number, capacity = lounge.capacity) {
-	return `${lounge.name} occupancy is currently ${occupancy} out of ${capacity}.`;
+// A lounge's row on the page: the list item headed by its name.
+function loungeRow(page: Page, lounge: Lounge) {
+	return page
+		.getByRole("listitem")
+		.filter({ has: page.getByRole("heading", { name: lounge.name, exact: true }) });
 }
 
-function reconnectingText(lounge: Lounge, occupancy: number, capacity = lounge.capacity) {
-	return `${lounge.name} occupancy was ${occupancy} out of ${capacity} (reconnecting…).`;
+// Checks a lounge's row shows a figure ("42 / 101") and a status line.
+async function expectRow(
+	page: Page,
+	lounge: Lounge,
+	status: string | RegExp,
+	occupancy: number,
+	capacity = lounge.capacity,
+) {
+	let row = loungeRow(page, lounge);
+	await expect(row.getByText(`${occupancy} / ${capacity}`, { exact: true })).toBeVisible();
+	await expect(row.getByText(status)).toBeVisible();
 }
 
 // Answers every occupancy feed the page opens, and returns each zone's socket once it's open.
@@ -61,20 +73,27 @@ test("shows each lounge's occupancy from its own feed", async ({ page }) => {
 	}
 
 	for (let [index, lounge] of LOUNGES.entries()) {
-		await expect(page.getByText(occupancyText(lounge, 10 + index))).toBeVisible();
+		await expectRow(page, lounge, /^Live/, 10 + index);
 	}
 });
 
-test("shows nothing for a lounge until its feed reports", async ({ page }) => {
+test("shows every lounge, in order, as waiting until its feed reports", async ({ page }) => {
 	let feed = await mockFeeds(page);
 	await page.goto("/");
-	let [reporting, ...silent] = LOUNGES;
 
+	await expect(page.getByRole("listitem").getByRole("heading")).toHaveText(
+		LOUNGES.map((lounge) => lounge.name),
+	);
+	for (let lounge of LOUNGES) {
+		await expect(loungeRow(page, lounge).getByText("Waiting for first report")).toBeVisible();
+	}
+
+	let [reporting, ...silent] = LOUNGES;
 	(await feed(reporting.zoneId)).send(occupancyMessage(reporting, 42));
 
-	await expect(page.getByText(occupancyText(reporting, 42))).toBeVisible();
+	await expectRow(page, reporting, /^Live/, 42);
 	for (let lounge of silent) {
-		await expect(page.getByText(lounge.name)).toHaveCount(0);
+		await expect(loungeRow(page, lounge).getByText("Waiting for first report")).toBeVisible();
 	}
 });
 
@@ -85,11 +104,30 @@ test("updates a lounge when its feed reports again", async ({ page }) => {
 	let ws = await feed(lounge.zoneId);
 
 	ws.send(occupancyMessage(lounge, 42));
-	await expect(page.getByText(occupancyText(lounge, 42))).toBeVisible();
+	await expectRow(page, lounge, /^Live/, 42);
 	ws.send(occupancyMessage(lounge, 57));
 
-	await expect(page.getByText(occupancyText(lounge, 57))).toBeVisible();
-	await expect(page.getByText(occupancyText(lounge, 42))).toHaveCount(0);
+	await expectRow(page, lounge, /^Live/, 57);
+	await expect(
+		loungeRow(page, lounge).getByText(`42 / ${lounge.capacity}`, { exact: true }),
+	).toHaveCount(0);
+});
+
+test("says how full a live lounge is, to the nearest percent", async ({ page }) => {
+	let feed = await mockFeeds(page);
+	await page.goto("/");
+	let lounge = LOUNGES[0];
+	let ws = await feed(lounge.zoneId);
+
+	for (let [occupancy, capacity, status] of [
+		[50, 200, "Live · 25% full"],
+		[1, 3, "Live · 33% full"],
+		[2, 3, "Live · 67% full"],
+		[250, 200, "Live · 125% full"],
+	] as const) {
+		ws.send(occupancyMessage(lounge, occupancy, capacity));
+		await expectRow(page, lounge, status, occupancy, capacity);
+	}
 });
 
 test("follows the capacity the feed reports", async ({ page }) => {
@@ -99,10 +137,10 @@ test("follows the capacity the feed reports", async ({ page }) => {
 	let ws = await feed(lounge.zoneId);
 
 	ws.send(occupancyMessage(lounge, 42, 150));
-	await expect(page.getByText(occupancyText(lounge, 42, 150))).toBeVisible();
+	await expectRow(page, lounge, /^Live/, 42, 150);
 	ws.send(occupancyMessage(lounge, 42, 175));
 
-	await expect(page.getByText(occupancyText(lounge, 42, 175))).toBeVisible();
+	await expectRow(page, lounge, /^Live/, 42, 175);
 });
 
 test("marks a lounge not live while its feed reconnects, then recovers", async ({ page }) => {
@@ -111,14 +149,14 @@ test("marks a lounge not live while its feed reconnects, then recovers", async (
 	let lounge = LOUNGES[0];
 	let ws = await feed(lounge.zoneId);
 	ws.send(occupancyMessage(lounge, 42));
-	await expect(page.getByText(occupancyText(lounge, 42))).toBeVisible();
+	await expectRow(page, lounge, /^Live/, 42);
 
 	await ws.close();
 
-	await expect(page.getByText(reconnectingText(lounge, 42))).toBeVisible();
+	await expectRow(page, lounge, "Reconnecting · last figure shown", 42);
 	let reopened = await feed(lounge.zoneId, ws);
 	reopened.send(occupancyMessage(lounge, 43));
-	await expect(page.getByText(occupancyText(lounge, 43))).toBeVisible();
+	await expectRow(page, lounge, /^Live/, 43);
 });
 
 test("shows an empty lounge", async ({ page }) => {
@@ -128,7 +166,7 @@ test("shows an empty lounge", async ({ page }) => {
 
 	(await feed(lounge.zoneId)).send(occupancyMessage(lounge, 0));
 
-	await expect(page.getByText(occupancyText(lounge, 0))).toBeVisible();
+	await expectRow(page, lounge, /^Live/, 0);
 });
 
 test("keeps showing lounges when a feed sends something unreadable", async ({ page }) => {
@@ -137,14 +175,14 @@ test("keeps showing lounges when a feed sends something unreadable", async ({ pa
 	let [broken, healthy] = LOUNGES;
 	let brokenWs = await feed(broken.zoneId);
 	brokenWs.send(occupancyMessage(broken, 42));
-	await expect(page.getByText(occupancyText(broken, 42))).toBeVisible();
+	await expectRow(page, broken, /^Live/, 42);
 
 	brokenWs.send("not json");
 	brokenWs.send(JSON.stringify({ args: {} }));
 	(await feed(healthy.zoneId)).send(occupancyMessage(healthy, 7));
 
-	await expect(page.getByText(occupancyText(healthy, 7))).toBeVisible();
-	await expect(page.getByText(occupancyText(broken, 42))).toBeVisible();
+	await expectRow(page, healthy, /^Live/, 7);
+	await expectRow(page, broken, /^Live/, 42);
 });
 
 test("ignores unreadable messages without throwing", async ({ page }) => {
@@ -159,6 +197,6 @@ test("ignores unreadable messages without throwing", async ({ page }) => {
 	ws.send(JSON.stringify({ args: {} }));
 	ws.send(occupancyMessage(lounge, 42));
 
-	await expect(page.getByText(occupancyText(lounge, 42))).toBeVisible();
+	await expectRow(page, lounge, /^Live/, 42);
 	expect(errors).toEqual([]);
 });
