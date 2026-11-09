@@ -1,0 +1,16 @@
+[build]
+# version.txt lets CI tell when a deploy preview is serving a given commit.
+command = "npm run build && echo $COMMIT_REF > dist/version.txt"
+publish = "dist"
+
+[build.environment]
+NODE_VERSION = "24"
+
+# There's one page, so Netlify's default routing is right: / serves index.html, and anything
+# else that isn't a file in dist/ serves a 404.
+
+# Vite fingerprints everything in /assets, so it can be cached forever.
+[[headers]]
+for = "/assets/*"
+[headers.values]
+Cache-Control = "public, max-age=31536000, immutable"

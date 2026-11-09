@@ -25,7 +25,7 @@ npm scripts must not use `&&` or inline env vars, because they need to run under
 
 ## Deploying
 
-The site is hosted on Surge: `npm run build`, then publish `dist/`. It will move to Netlify, with deploy previews tested by CI, as beerstyles does.
+Netlify builds and hosts the site (`netlify.toml`): `npm run build` publishes `dist/`, and the build writes the commit SHA to `/version.txt`. There's one page, so Netlify's default routing is enough: anything that isn't a file in `dist/` gets a 404. Each PR gets a deploy preview, and the "Deploy preview" workflow waits for the preview to serve the PR's commit, checks status codes and asset caching, then runs the e2e suite against it. It needs the repository variable `NETLIFY_SITE_NAME`.
 
 ## Layout
 

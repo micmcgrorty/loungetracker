@@ -1,0 +1,84 @@
+name: Deploy preview
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    name: E2E tests on deploy preview
+    # Set the repository variable NETLIFY_SITE_NAME (the "<name>" in <name>.netlify.app) to enable.
+    # Netlify only builds previews for PRs into main. A stacked PR skips this job; once it's
+    # retargeted to main, push to it (e.g. merge main in) so Netlify builds its preview.
+    if: vars.NETLIFY_SITE_NAME != '' && github.base_ref == 'main'
+    runs-on: ubuntu-latest
+    env:
+      E2E_BASE_URL: https://deploy-preview-${{ github.event.pull_request.number }}--${{ vars.NETLIFY_SITE_NAME }}.netlify.app
+    steps:
+      - name: Wait for Netlify to deploy this commit
+        env:
+          SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          for attempt in $(seq 1 60); do
+            served=$(curl -fsS "$E2E_BASE_URL/version.txt" 2>/dev/null | tr -d '[:space:]' || true)
+            if [ "$served" = "$SHA" ]; then
+              echo "Preview is serving $SHA"
+              exit 0
+            fi
+            echo "Waiting for $SHA (preview serves '${served:-nothing}')"
+            sleep 10
+          done
+          echo "::error::Deploy preview did not serve $SHA within 10 minutes"
+          exit 1
+      - name: Check HTTP status codes and caching
+        run: |
+          failed=0
+          # Netlify can answer the first requests to a new deploy before its rules apply,
+          # so each check retries a few times before it counts as a failure.
+          check() {
+            for attempt in 1 2 3 4; do
+              got=$(curl -s -o /dev/null -w "%{http_code}" "$E2E_BASE_URL$1")
+              [ "$got" = "$2" ] && break
+              sleep 5
+            done
+            echo "$1 → $got (want $2, attempt $attempt)"
+            [ "$got" = "$2" ] || failed=1
+          }
+          check / 200
+          check /favicon.svg 200
+          check /no/such/page 404
+          asset=$(curl -s "$E2E_BASE_URL/" | grep -o '/assets/[^"]*\.js' | head -1)
+          if [ -z "$asset" ]; then
+            echo "::error::Found no script in /assets on the home page"
+            exit 1
+          fi
+          check "$asset" 200
+          if curl -sI "$E2E_BASE_URL$asset" | grep -qi '^cache-control:.*immutable'; then
+            echo "$asset is cached as immutable"
+          else
+            echo "::error::$asset is not cached as immutable"
+            failed=1
+          fi
+          exit $failed
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: playwright-report-preview
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 14
