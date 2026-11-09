@@ -28,7 +28,12 @@ function occupancyText(lounge: Lounge, occupancy: number, capacity = lounge.capa
 	return `${lounge.name} occupancy is currently ${occupancy} out of ${capacity}.`;
 }
 
+function reconnectingText(lounge: Lounge, occupancy: number, capacity = lounge.capacity) {
+	return `${lounge.name} occupancy was ${occupancy} out of ${capacity} (reconnecting…).`;
+}
+
 // Answers every occupancy feed the page opens, and returns each zone's socket once it's open.
+// Pass the socket a zone had before to wait for the page to reconnect.
 async function mockFeeds(page: Page) {
 	let sockets = new Map<string, WebSocketRoute>();
 	await page.routeWebSocket(
@@ -37,8 +42,11 @@ async function mockFeeds(page: Page) {
 			sockets.set(new URL(ws.url()).searchParams.get("zone_id")!, ws);
 		},
 	);
-	return async (zoneId: string) => {
-		await expect(() => expect(sockets.has(zoneId)).toBe(true)).toPass();
+	return async (zoneId: string, replacing?: WebSocketRoute) => {
+		await expect(() => {
+			expect(sockets.has(zoneId)).toBe(true);
+			expect(sockets.get(zoneId)).not.toBe(replacing);
+		}).toPass();
 		return sockets.get(zoneId)!;
 	};
 }
@@ -95,6 +103,22 @@ test("follows the capacity the feed reports", async ({ page }) => {
 	ws.send(occupancyMessage(lounge, 42, 175));
 
 	await expect(page.getByText(occupancyText(lounge, 42, 175))).toBeVisible();
+});
+
+test("marks a lounge not live while its feed reconnects, then recovers", async ({ page }) => {
+	let feed = await mockFeeds(page);
+	await page.goto("/");
+	let lounge = LOUNGES[0];
+	let ws = await feed(lounge.zoneId);
+	ws.send(occupancyMessage(lounge, 42));
+	await expect(page.getByText(occupancyText(lounge, 42))).toBeVisible();
+
+	await ws.close();
+
+	await expect(page.getByText(reconnectingText(lounge, 42))).toBeVisible();
+	let reopened = await feed(lounge.zoneId, ws);
+	reopened.send(occupancyMessage(lounge, 43));
+	await expect(page.getByText(occupancyText(lounge, 43))).toBeVisible();
 });
 
 test("shows an empty lounge", async ({ page }) => {

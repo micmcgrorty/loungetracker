@@ -1,6 +1,10 @@
-import { describe, expect, it } from "vite-plus/test";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
-import { feedUrl, parseReport } from "./occupancy-feed.ts";
+import type { ConnectFeed, FeedHandlers, FeedState } from "./occupancy-feed.ts";
+import { watchOccupancy } from "./occupancy-feed.ts";
+
+const ZONE_URL =
+	"wss://api.livereachmedia.com/api/v1/marketing/displays/internal//ws?v=1&passive=true&zone_id=4111";
 
 // A message captured from the live feed for zone 4114.
 const LIVE_MESSAGE = JSON.stringify({
@@ -22,24 +26,63 @@ function report(occupancy: unknown, capacity: unknown = 100) {
 	return JSON.stringify({ args: { camera: { occupancy }, zone: { max_capacity: capacity } } });
 }
 
-describe("feedUrl", () => {
-	it("is the zone's feed, exactly as the live API expects it", () => {
-		expect(feedUrl(4111)).toBe(
-			"wss://api.livereachmedia.com/api/v1/marketing/displays/internal//ws?v=1&passive=true&zone_id=4111",
-		);
-	});
+// The test adapter at the socket seam: records every socket the feed opens.
+function fakeSockets() {
+	let sockets: { url: string; handlers: FeedHandlers; closed: boolean }[] = [];
+	let connect: ConnectFeed = (url, handlers) => {
+		let socket = { url, handlers, closed: false };
+		sockets.push(socket);
+		return {
+			close: () => {
+				socket.closed = true;
+			},
+		};
+	};
+	return { connect, sockets, latest: () => sockets.at(-1)! };
+}
+
+function watch(zoneId = 4111) {
+	let fake = fakeSockets();
+	let states: FeedState[] = [];
+	let stop = watchOccupancy(zoneId, (state) => states.push(state), fake.connect);
+	return { ...fake, states, stop, last: () => states.at(-1) };
+}
+
+beforeEach(() => {
+	vi.useFakeTimers();
 });
 
-describe("parseReport", () => {
-	it("reads the occupancy and capacity from a live report", () => {
-		expect(parseReport(LIVE_MESSAGE)).toEqual({ occupancy: 46, capacity: 401 });
+afterEach(() => {
+	vi.useRealTimers();
+});
+
+describe("watchOccupancy", () => {
+	it("opens the zone's feed, exactly as the live API expects it", () => {
+		let feed = watch(4111);
+
+		expect(feed.sockets.map((socket) => socket.url)).toEqual([ZONE_URL]);
 	});
 
-	it("reads an empty lounge as 0, not as no report", () => {
-		expect(parseReport(report(0))).toEqual({ occupancy: 0, capacity: 100 });
+	it("reports the occupancy and capacity the feed sends, as live", () => {
+		let feed = watch();
+
+		feed.latest().handlers.onMessage(LIVE_MESSAGE);
+
+		expect(feed.last()).toEqual({ report: { occupancy: 46, capacity: 401 }, live: true });
 	});
 
-	it("returns null for anything that isn't an occupancy report", () => {
+	it("reports an empty lounge as 0, not as no report", () => {
+		let feed = watch();
+
+		feed.latest().handlers.onMessage(report(0));
+
+		expect(feed.last()).toEqual({ report: { occupancy: 0, capacity: 100 }, live: true });
+	});
+
+	it("ignores anything that isn't a complete report, keeping the last good one", () => {
+		let feed = watch();
+		feed.latest().handlers.onMessage(report(42));
+
 		for (let data of [
 			"not json",
 			"null",
@@ -47,27 +90,112 @@ describe("parseReport", () => {
 			JSON.stringify({}),
 			JSON.stringify({ args: {} }),
 			JSON.stringify({ args: { camera: null } }),
+			JSON.stringify({ args: { camera: { occupancy: 42 } } }),
 			report("42"),
 			report(-1),
 			report(1.5),
 			report(null),
-			new ArrayBuffer(8),
-		]) {
-			expect(parseReport(data)).toBeNull();
-		}
-	});
-
-	it("returns null for a report without a usable capacity", () => {
-		for (let data of [
-			JSON.stringify({ args: { camera: { occupancy: 42 } } }),
-			JSON.stringify({ args: { camera: { occupancy: 42 }, zone: {} } }),
 			report(42, "401"),
 			report(42, 0),
 			report(42, -1),
 			report(42, 1.5),
 			report(42, null),
+			new ArrayBuffer(8),
 		]) {
-			expect(parseReport(data)).toBeNull();
+			feed.latest().handlers.onMessage(data);
 		}
+
+		expect(feed.states).toEqual([{ report: { occupancy: 42, capacity: 100 }, live: true }]);
+	});
+
+	it("marks the last report not live when the feed closes, and reconnects after a second", () => {
+		let feed = watch();
+		feed.latest().handlers.onMessage(report(42));
+
+		feed.latest().handlers.onClose();
+
+		expect(feed.last()).toEqual({ report: { occupancy: 42, capacity: 100 }, live: false });
+		vi.advanceTimersByTime(999);
+		expect(feed.sockets).toHaveLength(1);
+		vi.advanceTimersByTime(1);
+		expect(feed.sockets).toHaveLength(2);
+		expect(feed.latest().url).toBe(feed.sockets[0].url);
+
+		feed.latest().handlers.onMessage(report(43));
+		expect(feed.last()).toEqual({ report: { occupancy: 43, capacity: 100 }, live: true });
+	});
+
+	it("waits twice as long after each failed attempt, up to 30 seconds", () => {
+		let feed = watch();
+		let waits: number[] = [];
+
+		for (let attempt = 0; attempt < 8; attempt++) {
+			let sockets = feed.sockets.length;
+			feed.latest().handlers.onClose();
+			let waited = 0;
+			while (feed.sockets.length === sockets) {
+				vi.advanceTimersByTime(1000);
+				waited += 1000;
+			}
+			waits.push(waited);
+		}
+
+		expect(waits).toEqual([1000, 2000, 4000, 8000, 16000, 30000, 30000, 30000]);
+	});
+
+	it("waits a second again once a reconnected feed has reported", () => {
+		let feed = watch();
+		feed.latest().handlers.onClose();
+		vi.advanceTimersByTime(1000);
+		feed.latest().handlers.onClose();
+		vi.advanceTimersByTime(2000);
+		feed.latest().handlers.onMessage(report(42));
+
+		feed.latest().handlers.onClose();
+		vi.advanceTimersByTime(1000);
+
+		expect(feed.sockets).toHaveLength(4);
+	});
+
+	it("treats a feed that's silent for a minute as dropped", () => {
+		let feed = watch();
+		vi.advanceTimersByTime(30_000);
+		feed.latest().handlers.onMessage(report(42));
+
+		vi.advanceTimersByTime(59_999);
+		expect(feed.last()?.live).toBe(true);
+		expect(feed.sockets[0].closed).toBe(false);
+		vi.advanceTimersByTime(1);
+
+		expect(feed.sockets[0].closed).toBe(true);
+		expect(feed.last()).toEqual({ report: { occupancy: 42, capacity: 100 }, live: false });
+		vi.advanceTimersByTime(1000);
+		expect(feed.sockets).toHaveLength(2);
+	});
+
+	it("treats a feed that never reports as dropped after a minute", () => {
+		let feed = watch();
+
+		vi.advanceTimersByTime(60_000);
+
+		expect(feed.sockets[0].closed).toBe(true);
+		expect(feed.states).toEqual([]);
+	});
+
+	it("stops for good: closes its socket and never reconnects", () => {
+		let feed = watch();
+		feed.latest().handlers.onClose();
+
+		feed.stop();
+		vi.advanceTimersByTime(10 * 60_000);
+
+		expect(feed.sockets).toHaveLength(1);
+
+		let open = watch();
+		open.stop();
+		vi.advanceTimersByTime(10 * 60_000);
+
+		expect(open.sockets).toHaveLength(1);
+		expect(open.sockets[0].closed).toBe(true);
 	});
 });
