@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
-import type { ConnectFeed, FeedHandlers, FeedState } from "./occupancy-feed.ts";
+import type { ConnectFeed, FeedHandlers, FeedState, WatchWakes } from "./occupancy-feed.ts";
 import { watchOccupancy } from "./occupancy-feed.ts";
 
 const ZONE_URL =
@@ -41,11 +41,25 @@ function fakeSockets() {
 	return { connect, sockets, latest: () => sockets.at(-1)! };
 }
 
+// The test adapter for wake-ups: `wake()` plays the browser coming back online or into view.
+function fakeWakes() {
+	let listeners = new Set<() => void>();
+	let wakes: WatchWakes = (onWake) => {
+		listeners.add(onWake);
+		return () => listeners.delete(onWake);
+	};
+	return { wakes, wake: () => listeners.forEach((onWake) => onWake()) };
+}
+
 function watch(zoneId = 4111) {
 	let fake = fakeSockets();
+	let { wakes, wake } = fakeWakes();
 	let states: FeedState[] = [];
-	let stop = watchOccupancy(zoneId, (state) => states.push(state), fake.connect);
-	return { ...fake, states, stop, last: () => states.at(-1) };
+	let stop = watchOccupancy(zoneId, (state) => states.push(state), {
+		connect: fake.connect,
+		wakes,
+	});
+	return { ...fake, states, stop, wake, last: () => states.at(-1) };
 }
 
 beforeEach(() => {
@@ -157,29 +171,51 @@ describe("watchOccupancy", () => {
 		expect(feed.sockets).toHaveLength(4);
 	});
 
-	it("treats a feed that's silent for a minute as dropped", () => {
+	it("stays live through a long silence, without reconnecting", () => {
 		let feed = watch();
-		vi.advanceTimersByTime(30_000);
 		feed.latest().handlers.onMessage(report(42));
 
-		vi.advanceTimersByTime(59_999);
-		expect(feed.last()?.live).toBe(true);
-		expect(feed.sockets[0].closed).toBe(false);
-		vi.advanceTimersByTime(1);
+		// The feed only sends when the figure changes, so a quiet hour is a healthy feed.
+		vi.advanceTimersByTime(60 * 60_000);
 
+		expect(feed.sockets).toHaveLength(1);
+		expect(feed.sockets[0].closed).toBe(false);
+		expect(feed.states).toEqual([{ report: { occupancy: 42, capacity: 100 }, live: true }]);
+	});
+
+	it("reconnects straight away when the browser wakes, staying live", () => {
+		let feed = watch();
+		feed.latest().handlers.onMessage(report(42));
+
+		feed.wake();
+
+		expect(feed.sockets).toHaveLength(2);
 		expect(feed.sockets[0].closed).toBe(true);
-		expect(feed.last()).toEqual({ report: { occupancy: 42, capacity: 100 }, live: false });
-		vi.advanceTimersByTime(1000);
+		expect(feed.latest().url).toBe(feed.sockets[0].url);
+		expect(feed.states).toEqual([{ report: { occupancy: 42, capacity: 100 }, live: true }]);
+		feed.latest().handlers.onMessage(report(43));
+		expect(feed.last()).toEqual({ report: { occupancy: 43, capacity: 100 }, live: true });
+	});
+
+	it("reconnects straight away when woken mid-wait, instead of waiting out the backoff", () => {
+		let feed = watch();
+		feed.latest().handlers.onClose();
+		vi.advanceTimersByTime(500);
+
+		feed.wake();
+
+		expect(feed.sockets).toHaveLength(2);
+		vi.advanceTimersByTime(10 * 60_000);
 		expect(feed.sockets).toHaveLength(2);
 	});
 
-	it("treats a feed that never reports as dropped after a minute", () => {
+	it("stops listening for wake-ups once stopped", () => {
 		let feed = watch();
+		feed.stop();
 
-		vi.advanceTimersByTime(60_000);
+		feed.wake();
 
-		expect(feed.sockets[0].closed).toBe(true);
-		expect(feed.states).toEqual([]);
+		expect(feed.sockets).toHaveLength(1);
 	});
 
 	it("stops for good: closes its socket and never reconnects", () => {

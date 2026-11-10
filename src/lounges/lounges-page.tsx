@@ -14,7 +14,7 @@ export function LoungesPage() {
 					<LoungeOccupancy key={lounge.zoneId} lounge={lounge} />
 				))}
 			</ul>
-			<p className={styles.footnote}>Each lounge updates about every 15 seconds.</p>
+			<p className={styles.footnote}>Each lounge updates as soon as its occupancy changes.</p>
 		</main>
 	);
 }
