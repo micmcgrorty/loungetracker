@@ -159,6 +159,22 @@ test("marks a lounge not live while its feed reconnects, then recovers", async (
 	await expectRow(page, lounge, /^Live/, 43);
 });
 
+test("reconnects a lounge's feed when the browser comes back online", async ({ page }) => {
+	let feed = await mockFeeds(page);
+	await page.goto("/");
+	let lounge = LOUNGES[0];
+	let ws = await feed(lounge.zoneId);
+	ws.send(occupancyMessage(lounge, 42));
+	await expectRow(page, lounge, /^Live/, 42);
+
+	await page.context().setOffline(true);
+	await page.context().setOffline(false);
+
+	let reopened = await feed(lounge.zoneId, ws);
+	reopened.send(occupancyMessage(lounge, 43));
+	await expectRow(page, lounge, /^Live/, 43);
+});
+
 test("shows an empty lounge", async ({ page }) => {
 	let feed = await mockFeeds(page);
 	await page.goto("/");

@@ -42,8 +42,6 @@ function field(value: unknown, key: string): unknown {
 // After a feed drops, wait this long before reconnecting, doubling after each failed attempt.
 const FIRST_RETRY_MS = 1000;
 const MAX_RETRY_MS = 30_000;
-// Feeds report about every 15 seconds; one that's said nothing for this long has dropped.
-const SILENCE_MS = 60_000;
 
 /** What a lounge's feed currently says: its latest report, and whether that report is live. */
 export interface FeedState {
@@ -83,23 +81,48 @@ export const connectWebSocket: ConnectFeed = (url, handlers) => {
 };
 
 /**
+ * The seam for wake-ups: calls `onWake` whenever the browser has reason to think a socket may have
+ * died without closing, and returns a function that stops listening.
+ */
+export type WatchWakes = (onWake: () => void) => () => void;
+
+/** The browser's wake-ups: coming back online, or the page becoming visible again. */
+export const browserWakes: WatchWakes = (onWake) => {
+	let onVisibilityChange = () => {
+		if (document.visibilityState === "visible") onWake();
+	};
+	window.addEventListener("online", onWake);
+	document.addEventListener("visibilitychange", onVisibilityChange);
+	return () => {
+		window.removeEventListener("online", onWake);
+		document.removeEventListener("visibilitychange", onVisibilityChange);
+	};
+};
+
+/**
  * Watches a zone's occupancy feed, calling `onChange` whenever what it says changes.
  * Returns a function that stops watching for good.
  *
- * Messages that aren't complete reports are ignored, keeping the last good report. When the feed
- * closes, fails, or says nothing for a minute, the last report stays but is no longer live, and
- * the feed reconnects after a second, doubling the wait after each failed attempt up to 30
- * seconds. A report resets the wait.
+ * Messages that aren't complete reports are ignored, keeping the last good report. The feed only
+ * sends when the figure changes, so silence is normal, never a sign of a drop. When the feed
+ * closes or fails, the last report stays but is no longer live, and the feed reconnects after a
+ * second, doubling the wait after each failed attempt up to 30 seconds. A report resets the wait.
+ *
+ * A socket can also die without closing, for example while a laptop sleeps. So whenever the
+ * browser wakes (`wakes`), the feed reconnects straight away. The server sends the current figure
+ * as soon as a socket opens, so the lounge stays live throughout.
  */
 export function watchOccupancy(
 	zoneId: number,
 	onChange: (state: FeedState) => void,
-	connect: ConnectFeed = connectWebSocket,
+	{
+		connect = connectWebSocket,
+		wakes = browserWakes,
+	}: { connect?: ConnectFeed; wakes?: WatchWakes } = {},
 ): () => void {
 	let state: FeedState = { report: null, live: false };
 	let socket: { close(): void };
 	let reconnect: ReturnType<typeof setTimeout> | undefined;
-	let silence: ReturnType<typeof setTimeout> | undefined;
 	let wait = FIRST_RETRY_MS;
 
 	function update(next: FeedState) {
@@ -107,16 +130,7 @@ export function watchOccupancy(
 		onChange(state);
 	}
 
-	function listen() {
-		clearTimeout(silence);
-		silence = setTimeout(() => {
-			socket.close();
-			dropped();
-		}, SILENCE_MS);
-	}
-
 	function dropped() {
-		clearTimeout(silence);
 		if (state.live) update({ ...state, live: false });
 		reconnect = setTimeout(open, wait);
 		wait = Math.min(wait * 2, MAX_RETRY_MS);
@@ -128,18 +142,23 @@ export function watchOccupancy(
 				let report = parseReport(data);
 				if (report === null) return;
 				wait = FIRST_RETRY_MS;
-				listen();
 				update({ report, live: true });
 			},
 			onClose: dropped,
 		});
-		listen();
+	}
+
+	function woken() {
+		clearTimeout(reconnect);
+		socket.close();
+		open();
 	}
 
 	open();
+	let stopWakes = wakes(woken);
 	return () => {
+		stopWakes();
 		clearTimeout(reconnect);
-		clearTimeout(silence);
 		socket.close();
 	};
 }
